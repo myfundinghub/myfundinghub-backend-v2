@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken')
 const User = require('../models/User')
-const { sendOTPEmail } = require('../utils/sendEmail')
+// const { sendOTPEmail } = require('../utils/sendEmail') // Disabled for now
 
 // ===== HELPERS =====
 const generateToken = (id) => {
@@ -9,11 +9,7 @@ const generateToken = (id) => {
   })
 }
 
-const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString()
-}
-
-// ===== SIGNUP =====
+// ===== SIGNUP (Without OTP) =====
 const signup = async (req, res) => {
   try {
     const { name, email, password, referralCode } = req.body
@@ -25,55 +21,47 @@ const signup = async (req, res) => {
       })
     }
 
+    // Check if user exists
     let user = await User.findOne({ email })
-
-    // If already verified user exists
-    if (user && user.isEmailVerified) {
+    if (user) {
       return res.status(400).json({
         success: false,
         message: 'User already exists with this email'
       })
     }
 
-    const otp = generateOTP()
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000) // 10 min
-
-    // If unverified user already exists, update it
-    if (user && !user.isEmailVerified) {
-      user.name = name
-      user.password = password
-      user.emailOTP = otp
-      user.emailOTPExpiry = otpExpiry
-      if (referralCode) {
-        const refUser = await User.findOne({ referralCode })
-        if (refUser) user.referredBy = refUser._id
-      }
-      await user.save()
-    } else {
-      const newUserData = {
-        name,
-        email,
-        password,
-        emailOTP: otp,
-        emailOTPExpiry: otpExpiry
-      }
-
-      if (referralCode) {
-        const refUser = await User.findOne({ referralCode })
-        if (refUser) {
-          newUserData.referredBy = refUser._id
-        }
-      }
-
-      user = await User.create(newUserData)
+    // Create user directly (no OTP verification)
+    const newUserData = {
+      name,
+      email,
+      password,
+      isEmailVerified: true  // Auto verify
     }
 
-    await sendOTPEmail(email, otp, 'verify')
+    // Handle referral
+    if (referralCode) {
+      const refUser = await User.findOne({ referralCode })
+      if (refUser) {
+        newUserData.referredBy = refUser._id
+      }
+    }
 
-    res.status(200).json({
+    user = await User.create(newUserData)
+
+    // Generate token
+    const token = generateToken(user._id)
+
+    res.status(201).json({
       success: true,
-      message: 'OTP sent to your email',
-      email
+      message: 'Account created successfully!',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        referralCode: user.referralCode
+      }
     })
   } catch (error) {
     console.error('Signup error:', error.message)
@@ -84,18 +72,10 @@ const signup = async (req, res) => {
   }
 }
 
-// ===== VERIFY EMAIL OTP =====
+// ===== VERIFY OTP (Skip - Auto Success) =====
 const verifyOTP = async (req, res) => {
   try {
-    const { email, otp } = req.body
-
-    if (!email || !otp) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email and OTP are required'
-      })
-    }
-
+    const { email } = req.body
     const user = await User.findOne({ email })
 
     if (!user) {
@@ -105,28 +85,12 @@ const verifyOTP = async (req, res) => {
       })
     }
 
-    if (user.emailOTP !== otp) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid OTP'
-      })
-    }
-
-    if (!user.emailOTPExpiry || user.emailOTPExpiry < new Date()) {
-      return res.status(400).json({
-        success: false,
-        message: 'OTP expired'
-      })
-    }
-
     user.isEmailVerified = true
-    user.emailOTP = undefined
-    user.emailOTPExpiry = undefined
     await user.save()
 
     const token = generateToken(user._id)
 
-    res.status(200).json({
+    res.json({
       success: true,
       message: 'Email verified successfully',
       token,
@@ -139,53 +103,19 @@ const verifyOTP = async (req, res) => {
       }
     })
   } catch (error) {
-    console.error('Verify OTP error:', error.message)
     res.status(500).json({
       success: false,
-      message: 'OTP verification failed'
+      message: 'Verification failed'
     })
   }
 }
 
-// ===== RESEND OTP =====
+// ===== RESEND OTP (Skip) =====
 const resendOTP = async (req, res) => {
-  try {
-    const { email } = req.body
-
-    const user = await User.findOne({ email })
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      })
-    }
-
-    if (user.isEmailVerified) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email already verified'
-      })
-    }
-
-    const otp = generateOTP()
-    user.emailOTP = otp
-    user.emailOTPExpiry = new Date(Date.now() + 10 * 60 * 1000)
-    await user.save()
-
-    await sendOTPEmail(email, otp, 'verify')
-
-    res.status(200).json({
-      success: true,
-      message: 'OTP resent successfully'
-    })
-  } catch (error) {
-    console.error('Resend OTP error:', error.message)
-    res.status(500).json({
-      success: false,
-      message: 'Could not resend OTP'
-    })
-  }
+  res.json({
+    success: true,
+    message: 'OTP verification is currently disabled'
+  })
 }
 
 // ===== LOGIN =====
@@ -218,13 +148,6 @@ const login = async (req, res) => {
       })
     }
 
-    if (!user.isEmailVerified) {
-      return res.status(403).json({
-        success: false,
-        message: 'Please verify your email first'
-      })
-    }
-
     if (user.isBanned) {
       return res.status(403).json({
         success: false,
@@ -234,7 +157,7 @@ const login = async (req, res) => {
 
     const token = generateToken(user._id)
 
-    res.status(200).json({
+    res.json({
       success: true,
       message: 'Login successful',
       token,
@@ -257,132 +180,28 @@ const login = async (req, res) => {
   }
 }
 
-// ===== FORGOT PASSWORD =====
+// ===== FORGOT PASSWORD (Temporarily Disabled) =====
 const forgotPassword = async (req, res) => {
-  try {
-    const { email } = req.body
-
-    const user = await User.findOne({ email })
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      })
-    }
-
-    const otp = generateOTP()
-    user.resetOTP = otp
-    user.resetOTPExpiry = new Date(Date.now() + 10 * 60 * 1000)
-    await user.save()
-
-    await sendOTPEmail(email, otp, 'reset')
-
-    res.status(200).json({
-      success: true,
-      message: 'Reset OTP sent to your email'
-    })
-  } catch (error) {
-    console.error('Forgot password error:', error.message)
-    res.status(500).json({
-      success: false,
-      message: 'Could not send reset OTP'
-    })
-  }
+  res.status(400).json({
+    success: false,
+    message: 'Password reset temporarily disabled. Contact support.'
+  })
 }
 
-// ===== VERIFY RESET OTP =====
+// ===== VERIFY RESET OTP (Disabled) =====
 const verifyResetOTP = async (req, res) => {
-  try {
-    const { email, otp } = req.body
-
-    const user = await User.findOne({ email })
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      })
-    }
-
-    if (user.resetOTP !== otp) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid OTP'
-      })
-    }
-
-    if (!user.resetOTPExpiry || user.resetOTPExpiry < new Date()) {
-      return res.status(400).json({
-        success: false,
-        message: 'OTP expired'
-      })
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'OTP verified successfully'
-    })
-  } catch (error) {
-    console.error('Verify reset OTP error:', error.message)
-    res.status(500).json({
-      success: false,
-      message: 'OTP verification failed'
-    })
-  }
+  res.status(400).json({
+    success: false,
+    message: 'Password reset temporarily disabled'
+  })
 }
 
-// ===== RESET PASSWORD =====
+// ===== RESET PASSWORD (Disabled) =====
 const resetPassword = async (req, res) => {
-  try {
-    const { email, otp, newPassword } = req.body
-
-    if (!email || !otp || !newPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email, OTP and new password are required'
-      })
-    }
-
-    const user = await User.findOne({ email })
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      })
-    }
-
-    if (user.resetOTP !== otp) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid OTP'
-      })
-    }
-
-    if (!user.resetOTPExpiry || user.resetOTPExpiry < new Date()) {
-      return res.status(400).json({
-        success: false,
-        message: 'OTP expired'
-      })
-    }
-
-    user.password = newPassword
-    user.resetOTP = undefined
-    user.resetOTPExpiry = undefined
-    await user.save()
-
-    res.status(200).json({
-      success: true,
-      message: 'Password reset successful'
-    })
-  } catch (error) {
-    console.error('Reset password error:', error.message)
-    res.status(500).json({
-      success: false,
-      message: 'Password reset failed'
-    })
-  }
+  res.status(400).json({
+    success: false,
+    message: 'Password reset temporarily disabled'
+  })
 }
 
 module.exports = {
