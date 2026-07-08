@@ -37,6 +37,7 @@ app.use(express.urlencoded({ extended: true }))
 app.use('/api/auth', require('./routes/authRoutes'))
 app.use('/api/user', require('./routes/userRoutes'))
 app.use('/api/admin', require('./routes/adminRoutes'))
+app.use('/api/payment', require('./routes/paymentRoutes'))
 
 // Health Check
 app.get('/', (req, res) => {
