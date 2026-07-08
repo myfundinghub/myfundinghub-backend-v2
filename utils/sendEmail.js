@@ -1,7 +1,16 @@
-const { MailerSend, EmailParams, Sender, Recipient } = require('mailersend')
+const nodemailer = require('nodemailer')
 
-const mailerSend = new MailerSend({
-  apiKey: process.env.MAILERSEND_API_KEY,
+const transporter = nodemailer.createTransport({
+  host: 'smtp.gmail.com',
+  port: 465,          // ← 465 use karo (587 nahi!)
+  secure: true,       // ← true for 465
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+  tls: {
+    rejectUnauthorized: false
+  }
 })
 
 const sendOTPEmail = async (email, otp, type = 'verify') => {
@@ -31,15 +40,9 @@ const sendOTPEmail = async (email, otp, type = 'verify') => {
           <p style="color: rgba(255,255,255,0.6); font-size: 15px; margin: 0 0 30px;">${message}</p>
           <div style="background: rgba(0,212,255,0.1); border: 2px solid rgba(0,212,255,0.3); border-radius: 16px; padding: 25px; margin: 20px auto; max-width: 300px;">
             <div style="font-size: 48px; font-weight: 900; color: #00D4FF; letter-spacing: 15px;">${otp}</div>
-            <div style="color: rgba(255,255,255,0.4); font-size: 12px; margin-top: 10px; letter-spacing: 2px;">YOUR OTP CODE</div>
+            <div style="color: rgba(255,255,255,0.4); font-size: 12px; margin-top: 10px;">YOUR OTP CODE</div>
           </div>
           <p style="color: rgba(255,255,255,0.4); font-size: 13px;">Expires in <strong style="color: #FF4444;">10 minutes</strong></p>
-          <div style="background: rgba(255,68,68,0.08); border: 1px solid rgba(255,68,68,0.2); border-radius: 10px; padding: 12px; margin-top: 20px; color: rgba(255,255,255,0.5); font-size: 12px;">
-            ⚠️ Never share this OTP with anyone.
-          </div>
-        </div>
-        <div style="padding: 20px; border-top: 1px solid rgba(255,255,255,0.05); text-align: center; color: rgba(255,255,255,0.3); font-size: 12px;">
-          © 2025 MyFundingHub. All Rights Reserved.
         </div>
       </div>
     </body>
@@ -47,24 +50,17 @@ const sendOTPEmail = async (email, otp, type = 'verify') => {
   `
 
   try {
-    const sentFrom = new Sender(
-      'MS_sOkrhs@test-51ndgwv90mnlzqx8.mlsender.net',
-      'MyFundingHub'
-    )
+    const info = await transporter.sendMail({
+      from: process.env.EMAIL_FROM,
+      to: email,
+      subject: subject,
+      html: html,
+    })
 
-    const recipients = [new Recipient(email, email)]
-
-    const emailParams = new EmailParams()
-      .setFrom(sentFrom)
-      .setTo(recipients)
-      .setSubject(subject)
-      .setHtml(html)
-
-    const response = await mailerSend.email.send(emailParams)
-    console.log('✅ Email sent successfully!')
-    return response
+    console.log('✅ Email sent:', info.messageId)
+    return info
   } catch (error) {
-    console.error('❌ Email error:', error.body || error.message)
+    console.error('❌ Email error:', error.message)
     throw new Error(`Email failed: ${error.message}`)
   }
 }
